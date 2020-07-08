@@ -29,39 +29,23 @@ var tokenGen = require('./jwt/token')
 
 var passport = require('passport');
 
-console.log(process.env);
-var client_id = process.env.OIDC_ID;
-var client_secret = process.env.OIDC_SECRET;
-var authorization_url = process.env.OIDC_AUTH;
-var token_url = process.env.OIDC_TOKEN;
-var issuer_id = process.env.OIDC_ISSUER;
+const WebAppStrategy = require('ibmcloud-appid').WebAppStrategy;
 
-//TODO this needs to become a kube environment variable or secret
-var callback_url = 'https://'+process.env.PROXY_HOST+'/tradr/auth/sso/callback';
+const APP_URL = process.env.APP_URL || "https://localhost:3000";
+const CALLBACK_URL = "/tradr/auth/sso/callback";
 
-var OpenIDConnectStrategy = require('passport-idaas-openidconnect').IDaaSOIDCStrategy;
-var Strategy = new OpenIDConnectStrategy({
-        authorizationURL: authorization_url,
-        tokenURL: token_url,
-        clientID: client_id,
-        scope: 'email',
-        response_type: 'code',
-        clientSecret: client_secret,
-        callbackURL: callback_url,
-        skipUserProfile: true,
-        issuer: issuer_id,
-        addCACert: true,
-        CACertPathList: ['/certs/blueid-root.crt', '/certs/blueid-intermediate.crt', '/certs/blueid-server.crt', '/certs/prepiam.toronto.ca.ibm.com.pem', '/certs/idaas.iam.ibm.com.pem', '/certs/digicert.crt', '/certs/idaas-digicert.crt', '/certs/digicert-root.pem', '/certs/digicert-subca.pem', '/certs/idaas_iam_ibm_com.crt', '/certs/IBMid-server.crt', '/certs/prepiam_toronto_ca_ibm_com.crt']
-    },
-    function (iss, sub, profile, accessToken, refreshToken, params, done) {
-        process.nextTick(function () {
-            profile.accessToken = accessToken;
-            profile.refreshToken = refreshToken;
-            done(null, profile);
-        });
+passport.use(
+    new WebAppStrategy({
+        tenantId: process.env.APPID_TENANT_ID,
+        clientId: process.env.APPID_CLIENT_ID,
+        secret: process.env.APPID_SECRET,
+        oauthServerUrl: process.env.APPID_OAUTH_SERVER_URL,
+        redirectUri: APP_URL + CALLBACK_URL
     })
+);
+passport.serializeUser((user, done) => done(null, user));
+passport.deserializeUser((obj, done) => done(null, obj));
 
-passport.use(Strategy);
 
 var app = express();
 
@@ -73,35 +57,9 @@ app.use(logger('dev'));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({extended: false}));
 app.use(cookieParser());
-app.use(session({resave: 'true', saveUninitialized: 'true' , secret: 'keyboard cat', maxAge: 3600000}));
+app.use(session({resave: true, saveUninitialized: true , secret: 'keyboard cat', maxAge: 3600000}));
 app.use(passport.initialize());
 app.use(passport.session());
-
-app.get('/tradr/auth/sso/callback', function (req, res, next) {
-    var redirect_url = req.session.originalUrl;
-    // var redirect_url = '/#/';
-    console.log(req.session);
-    //console.log(req.session.passport.user.accessToken);
-    passport.authenticate('openidconnect', {
-        successRedirect: redirect_url,
-        failureRedirect: '/failure',
-    })(req, res, next);
-});
-
-app.get('/tradr/failure', function (req, res) {
-    console.log('login failed');
-    // res.send('login failed');
-});
-
-app.get('/tradr/user', function (req, res) {
-    res.send({token: tokenGen.generateAccessToken(req.session.passport.user._json), session: req.session.passport});
-    //res.send(req.session.passport);
-});
-
-
-app.get('/tradr/login', passport.authenticate('openidconnect', {}));
-
-app.use('/tradr', ensureAuthenticated, express.static(path.join(__dirname, 'dist')));
 
 // Allow CORS
 app.use(function (req, res, next) {
@@ -111,32 +69,44 @@ app.use(function (req, res, next) {
 });
 
 
-/***************************************************************/
+const ensureAuthenticated = passport.authenticate(WebAppStrategy.STRATEGY_NAME);
 
-// Authentication
-
-
-function ensureAuthenticated(req, res, next) {
-    console.log(req.session);
-    if (!req.isAuthenticated()) {
-        console.log('user not authenticated, logging in')
-        req.session.originalUrl = req.originalUrl;
-        res.redirect('/tradr/login');
-    } else {
-        console.log("user is authenticated");
-        return next();
-    }
-}
-
-app.get('/tradr/hello', ensureAuthenticated, function (req, res) {
-    console.log(req.session.passport.user.accessToken);
-    res.send('Hello, ' + req.user['id'] + '!');
+app.get('/tradr/user', ensureAuthenticated, function (req, res) {
+    res.send({
+        token: tokenGen.generateAccessToken({
+            uniqueSecurityName: req.user.name,
+            id: req.user.identities[0].id,
+            name: req.user.name,
+            given_name: req.user.given_name,
+            family_name: req.user.family_name
+        }),
+        session: {
+            user: {
+                _json: {
+                    name: req.user.name,
+                    given_name: req.user.given_name,
+                    family_name: req.user.family_name
+                },
+                refreshToken: req.session[WebAppStrategy.AUTH_CONTEXT].refreshToken,
+                accessToken: req.session[WebAppStrategy.AUTH_CONTEXT].accessToken    
+            }
+        }
+    });
+    //res.send(req.session.passport);
 });
 
-passport.serializeUser((user, done) => done(null, user));
-passport.deserializeUser((obj, done) => done(null, obj));
-// Done Authenticating
-/***************************************************************/
+app.get(CALLBACK_URL, passport.authenticate(WebAppStrategy.STRATEGY_NAME));
+
+app.get('/tradr/hello', ensureAuthenticated, function (req, res) {
+    console.log(req.user);
+    res.send('Hello, ' + req.user.name + '!');
+});
+
+app.use('/tradr', ensureAuthenticated, express.static(path.join(__dirname, 'dist')));
+
+app.get('/portfolio', function (req, res) {
+
+});
 
 // catch 404 and forward to error handler
 app.use(function (req, res, next) {
