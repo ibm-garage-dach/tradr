@@ -31,7 +31,7 @@ function generateAccessToken(decryptedTokenInfo) {
         //For some reason Liberty fails if the address attribute is present
         delete decryptedTokenInfo.address;
     }
-    const token = jwt.sign(decryptedTokenInfo, key, { algorithm: 'RS256'});
+    const token = jwt.sign(decryptedTokenInfo, key, { algorithm: 'RS256', expiresIn: '1h' });
     // console.log('token');
     // console.log(token);
     return token;
