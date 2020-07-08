@@ -20,7 +20,7 @@ var favicon = require('serve-favicon');
 var logger = require('morgan');
 var cookieParser = require('cookie-parser');
 var bodyParser = require('body-parser');
-var proxy = require('express-http-proxy');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 
 var routes = require('./routes/index');
 
@@ -105,7 +105,10 @@ app.get('/tradr/hello', ensureAuthenticated, function (req, res) {
 
 app.use('/tradr', ensureAuthenticated, express.static(path.join(__dirname, 'dist')));
 
-app.use('/portfolio', proxy(process.env.PORTFOLIO_URL));
+app.use('/portfolio', createProxyMiddleware({
+    target: process.env.PORTFOLIO_URL,
+    changeOrigin: true
+}));
 
 // catch 404 and forward to error handler
 app.use(function (req, res, next) {
