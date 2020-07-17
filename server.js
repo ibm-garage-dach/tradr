@@ -106,7 +106,7 @@ app.get('/tradr/hello', ensureAuthenticated, function (req, res) {
 app.use('/tradr', ensureAuthenticated, express.static(path.join(__dirname, 'dist')));
 
 app.use('/portfolio', createProxyMiddleware({
-    target: process.env.PORTFOLIO_URL,
+    target: process.env.PORTFOLIO_URL.replace('/portfolio', ''),
     changeOrigin: true
 }));
 
